@@ -214,7 +214,7 @@ public final class MainActivity extends Activity {
             row.setOrientation(LinearLayout.HORIZONTAL);
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.WRAP_CONTENT
+                    LinearLayout.LayoutParams.WRAP_CONTENT
             );
             rowParams.bottomMargin = dp(8);
             content.addView(row, rowParams);
