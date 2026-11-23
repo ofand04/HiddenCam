@@ -43,7 +43,7 @@ public final class MainActivity extends Activity {
 
     private static final int COLOR_BACKGROUND = 0xFF10131B;
     private static final int COLOR_CARD = 0xFF1A2030;
-    private static final int COLOR_PRIMARY = 0xFFE53935;
+    private static final int COLOR_PRIMARY = 0xFFFF8A00;
     private static final int COLOR_TEXT = 0xFFF4F6FA;
     private static final int COLOR_MUTED = 0xFFABB4C4;
 
@@ -71,6 +71,7 @@ public final class MainActivity extends Activity {
     private TextView pinDots;
     private TextView pinMessage;
     private TextView recordingStatus;
+    private TextView folderStatus;
     private LinearLayout vaultContainer;
     private RadioButton frontRadio;
     private RadioButton rearRadio;
@@ -84,11 +85,13 @@ public final class MainActivity extends Activity {
     private boolean permissionRequestWasForRecording;
     private boolean setupRestartOnResume;
     private boolean resumed;
+    private boolean folderSelectionPrompted;
     private String lastDisplayedRecordingResult = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        ImmersiveMode.apply(this);
         getWindow().setFlags(
                 android.view.WindowManager.LayoutParams.FLAG_SECURE,
                 android.view.WindowManager.LayoutParams.FLAG_SECURE
@@ -141,6 +144,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        ImmersiveMode.apply(this);
         resumed = true;
         if (lockOnResume && PinManager.isConfigured(preferences)) {
             lockOnResume = false;
@@ -158,11 +162,18 @@ public final class MainActivity extends Activity {
             }
         } else if (authenticated && vaultContainer != null) {
             refreshVaultList();
+            updateFolderStatus();
             lastDisplayedRecordingResult = RecordingService.lastResult == null ? "" : RecordingService.lastResult;
             updateRecordingStatus();
             mainHandler.removeCallbacks(statusRefresh);
             mainHandler.post(statusRefresh);
         }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) ImmersiveMode.apply(this);
     }
 
     @Override
@@ -231,143 +242,79 @@ public final class MainActivity extends Activity {
 
     private void showPinScreen(String title, String subtitle) {
         beginScreen(title, subtitle);
-        pinMessage = addText(content, "Your PIN is entered only through this in-app keypad.", 14, COLOR_MUTED, 18);
-        pinDots = addText(content, pinProgress(), 30, COLOR_TEXT, 24);
-        pinDots.setGravity(Gravity.CENTER);
-
-        String[][] rows = new String[][]{
-                {"1", "2", "3"},
-                {"4", "5", "6"},
-                {"7", "8", "9"},
-                {"Clear", "0", "Delete"},
-                {"="}
+        TextView label = addText(content, "CALCULATOR", 12, COLOR_MUTED, 8);
+        label.setGravity(Gravity.END);
+        pinMessage = addText(content, "Enter your PIN, then press = to unlock.", 13, COLOR_MUTED, 8);
+        pinMessage.setGravity(Gravity.END);
+        pinDots = addText(content, "0", 38, COLOR_TEXT, 20);
+        pinDots.setGravity(Gravity.END);
+        pinDots.setSingleLine(true);
+        pinDots.setPadding(dp(8), dp(16), dp(8), dp(16));
+        pinDots.setBackgroundColor(COLOR_CARD);
+        String[][] rows = {
+            {"C", "⌫", "(", ")"},
+            {"7", "8", "9", "÷"},
+            {"4", "5", "6", "×"},
+            {"1", "2", "3", "−"},
+            {"0", "00", "+", "="}
         };
-        for (String[] rowValues : rows) {
+        for (String[] values : rows) {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-            );
-            rowParams.bottomMargin = dp(8);
-            content.addView(row, rowParams);
-            for (String value : rowValues) {
-                Button key = createButton(value, true);
-                LinearLayout.LayoutParams keyParams = new LinearLayout.LayoutParams(0, dp(58), 1f);
-                keyParams.setMargins(dp(4), 0, dp(4), 0);
-                row.addView(key, keyParams);
-                key.setOnClickListener(view -> handlePinKey(value));
+            LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
+            rp.bottomMargin = dp(8);
+            content.addView(row, rp);
+            for (String value : values) {
+                Button key = createButton(value, "=".equals(value));
+                key.setTextSize(20);
+                LinearLayout.LayoutParams kp = new LinearLayout.LayoutParams(0, dp(62), 1f);
+                kp.setMargins(dp(4), 0, dp(4), 0);
+                row.addView(key, kp);
+                key.setOnClickListener(v -> handlePinKey(value));
             }
         }
-
-        if (PinManager.isConfigured(preferences)) {
-            addButton(content, "Calculator-expression unlock", this::showCalculatorUnlockDialog);
-        }
-        addText(content, "PINs are stored as salted PBKDF2-HMAC-SHA256 verifiers. The vault uses device-keystore encryption keys.", 12, COLOR_MUTED, 24);
-    }
-
-
-    private void showCalculatorUnlockDialog() {
-        EditText expression = new EditText(this);
-        expression.setSingleLine(true);
-        expression.setInputType(InputType.TYPE_CLASS_TEXT);
-        expression.setHint("Example: (1234 * 100) + 56");
-        new AlertDialog.Builder(this)
-                .setTitle("Calculator unlock")
-                .setMessage("Enter an arithmetic expression whose result is your existing six-digit PIN. The PIN itself is not changed.")
-                .setView(expression)
-                .setPositiveButton("Calculate & unlock", (dialog, which) -> {
-                    char[] calculatedPin = null;
-                    try {
-                        calculatedPin = CalculatorExpression.toSixDigitPin(expression.getText().toString());
-                        authenticateCalculatedPin(calculatedPin);
-                    } catch (Exception exception) {
-                        Toast.makeText(this, exception.getMessage() == null ? "Invalid expression." : exception.getMessage(), Toast.LENGTH_LONG).show();
-                    } finally {
-                        if (calculatedPin != null) Arrays.fill(calculatedPin, '\0');
-                        expression.setText("");
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void authenticateCalculatedPin(char[] enteredPin) {
-        long lockUntil = preferences.getLong("pin_lock_until", 0L);
-        if (System.currentTimeMillis() < lockUntil) {
-            Arrays.fill(enteredPin, '\0');
-            long remaining = Math.max(1L, (lockUntil - System.currentTimeMillis() + 999L) / 1000L);
-            Toast.makeText(this, "Try again in " + remaining + " seconds.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        char[] pinCopy = Arrays.copyOf(enteredPin, enteredPin.length);
-        pinExecutor.execute(() -> {
-            boolean accepted = false;
-            try { accepted = PinManager.verify(preferences, pinCopy); }
-            catch (Exception ignored) { }
-            finally { Arrays.fill(pinCopy, '\0'); }
-            boolean result = accepted;
-            mainHandler.post(() -> {
-                if (result) {
-                    preferences.edit().putInt("pin_failed_attempts", 0).putLong("pin_lock_until", 0L).apply();
-                    if (!resumed || isFinishing()) { authenticated = false; lockOnResume = true; return; }
-                    authenticated = true; SessionManager.setApplicationUnlocked(true);
-                    showDashboard();
-                } else {
-                    int attempts = preferences.getInt("pin_failed_attempts", 0) + 1;
-                    SharedPreferences.Editor editor = preferences.edit();
-                    if (attempts >= MAX_FAILED_ATTEMPTS) {
-                        editor.putInt("pin_failed_attempts", 0)
-                                .putLong("pin_lock_until", System.currentTimeMillis() + LOCKOUT_MILLIS);
-                    } else editor.putInt("pin_failed_attempts", attempts);
-                    editor.apply();
-                    Toast.makeText(this, "Incorrect calculator result.", Toast.LENGTH_SHORT).show();
-                }
-            });
-        });
-        Arrays.fill(enteredPin, '\0');
+        addText(content, PinManager.isConfigured(preferences)
+            ? "Enter digits directly or use +, −, ×, ÷ and parentheses. Press = to submit."
+            : "Create a six-digit PIN and enter it again to confirm. Press = when finished.",
+            12, COLOR_MUTED, 16);
     }
 
     private void handlePinKey(String key) {
-        if ("Clear".equals(key)) {
-            pinBuffer.setLength(0);
-            updatePinDots();
-            return;
+        if ("C".equals(key)) { pinBuffer.setLength(0); updatePinDots(); return; }
+        if ("⌫".equals(key)) {
+            if (pinBuffer.length()>0) pinBuffer.deleteCharAt(pinBuffer.length()-1);
+            updatePinDots(); return;
         }
-        if ("Delete".equals(key)) {
-            if (pinBuffer.length() > 0) {
-                pinBuffer.deleteCharAt(pinBuffer.length() - 1);
-            }
-            updatePinDots();
-            return;
-        }
-        if ("=".equals(key)) {
-            if (pinBuffer.length() >= 4) {
-                mainHandler.postDelayed(this::completePinEntry, 80L);
-            }
-            return;
-        }
-        if (pinBuffer.length() >= PIN_LENGTH || key.length() != 1 || key.charAt(0) < '0' || key.charAt(0) > '9') {
-            return;
-        }
-        pinBuffer.append(key);
-        updatePinDots();
-        // Auto-submit when the configured length is reached; "=" can also submit earlier.
-        if (pinBuffer.length() == PIN_LENGTH) {
-            mainHandler.postDelayed(this::completePinEntry, 120L);
-        }
+        if ("=".equals(key)) { if (pinBuffer.length()>0) completePinEntry(); return; }
+        boolean configured=PinManager.isConfigured(preferences);
+        if (!configured && !key.matches("[0-9]{1,2}")) return;
+        String value=key;
+        if ("×".equals(value)) value="*";
+        else if ("÷".equals(value)) value="/";
+        else if ("−".equals(value)) value="-";
+        if (!value.matches("[0-9]{1,2}|[()+*/-]") || pinBuffer.length()+value.length()>120) return;
+        pinBuffer.append(value); updatePinDots();
     }
 
     private void completePinEntry() {
-        int len = pinBuffer.length();
-        if (len < 4 || len > 12) {
-            return;
+        String enteredText=pinBuffer.toString().trim();
+        pinBuffer.setLength(0); updatePinDots();
+        if (enteredText.isEmpty()) return;
+        char[] enteredPin;
+        if (!PinManager.isConfigured(preferences)) {
+            if (!enteredText.matches("[0-9]{4,12}")) {
+                Toast.makeText(this,"Use 4–12 digits for the PIN.",Toast.LENGTH_SHORT).show(); return;
+            }
+            enteredPin=enteredText.toCharArray();
+        } else if (enteredText.matches("[0-9]{4,12}")) {
+            enteredPin=enteredText.toCharArray();
+        } else {
+            try { enteredPin=CalculatorExpression.toSixDigitPin(enteredText); }
+            catch (Exception e) {
+                Toast.makeText(this,e.getMessage()==null?"Invalid calculator expression.":e.getMessage(),Toast.LENGTH_LONG).show();
+                return;
+            }
         }
-        char[] enteredPin = new char[len];
-        pinBuffer.getChars(0, len, enteredPin, 0);
-        pinBuffer.setLength(0);
-        updatePinDots();
-
         if (!PinManager.isConfigured(preferences)) {
             if (!confirmingPin) {
                 firstPin = enteredPin;
@@ -497,17 +444,11 @@ public final class MainActivity extends Activity {
     }
 
     private String pinProgress() {
-        StringBuilder display = new StringBuilder();
-        for (int index = 0; index < PIN_LENGTH; index++) {
-            display.append(index < pinBuffer.length() ? "● " : "○ ");
-        }
-        return display.toString().trim();
+        return pinBuffer.length()==0 ? "0" : pinBuffer.toString();
     }
 
     private void updatePinDots() {
-        if (pinDots != null) {
-            pinDots.setText(pinProgress());
-        }
+        if (pinDots!=null) pinDots.setText(pinProgress());
     }
 
     private void showDashboard() {
@@ -551,9 +492,12 @@ public final class MainActivity extends Activity {
             }
         });
 
-        addButton(content, "Start visible recording", this::requestRecordingPermissions);
-        addButton(content, "Stop recording and choose Save or Delete", this::confirmStopRecording);
-        addButton(content, "Password-protected folders", () -> startActivity(new Intent(this, FolderVaultActivity.class)));
+        folderStatus = addText(content, "", 14, COLOR_MUTED, 10);
+        updateFolderStatus();
+        addButton(content, "▣  Choose encrypted recording folder", () -> startActivity(new Intent(this, FolderVaultActivity.class)));
+        addButton(content, "●  Start visible recording", this::requestRecordingPermissions);
+        addButton(content, "■  Stop recording · Save or Delete", this::confirmStopRecording);
+        addButton(content, "▣  Manage encrypted folders", () -> startActivity(new Intent(this, FolderVaultActivity.class)));
         addButton(content, "Recover failed recordings", () -> startActivity(new Intent(this, RecoveryActivity.class)));
         addButton(content, "Change app name and icon", this::showIdentityPicker);
         recordingStatus = addText(content, "", 14, COLOR_MUTED, 16);
@@ -567,6 +511,13 @@ public final class MainActivity extends Activity {
         vaultContainer.setOrientation(LinearLayout.VERTICAL);
         content.addView(vaultContainer, matchWrap());
         refreshVaultList();
+        if (!hasRecordingDestination() && !folderSelectionPrompted) {
+            folderSelectionPrompted = true;
+            mainHandler.post(() -> {
+                if (authenticated && !isFinishing() && !hasRecordingDestination())
+                    startActivity(new Intent(this, FolderVaultActivity.class));
+            });
+        }
 
         addButton(content, "Lock HiddenCam", () -> {
             authenticated = false;
@@ -663,7 +614,25 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private boolean hasRecordingDestination() {
+        String id=SessionManager.getActiveRecordingFolder();
+        return id!=null && SessionManager.getFolderKey(id)!=null;
+    }
+
+    private void updateFolderStatus() {
+        if (folderStatus==null) return;
+        boolean ready=hasRecordingDestination();
+        folderStatus.setText(ready ? "✓  Encrypted recording destination is unlocked."
+            : "No place to save recording. Create or unlock an encrypted folder first.");
+        folderStatus.setTextColor(ready ? 0xFF81C784 : 0xFFFFB74D);
+    }
+
     private void requestRecordingPermissions() {
+        String folderId=SessionManager.getActiveRecordingFolder();
+        if (folderId==null || SessionManager.getFolderKey(folderId)==null) {
+            Toast.makeText(this,"No place to save recording. Create or unlock an encrypted folder first.",Toast.LENGTH_LONG).show();
+            startActivity(new Intent(this,FolderVaultActivity.class)); return;
+        }
         ArrayList<String> missing = new ArrayList<>();
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             missing.add(Manifest.permission.CAMERA);
@@ -706,13 +675,18 @@ public final class MainActivity extends Activity {
     }
 
     private void startRecordingService() {
+        String folderId=SessionManager.getActiveRecordingFolder();
+        if (folderId==null || SessionManager.getFolderKey(folderId)==null) {
+            Toast.makeText(this,"No place to save recording. Unlock an encrypted folder first.",Toast.LENGTH_LONG).show(); return;
+        }
         if (selectedCameraId == null) {
             Toast.makeText(this, "No usable camera was found on this device.", Toast.LENGTH_LONG).show();
             return;
         }
         Intent intent = new Intent(this, RecordingService.class)
                 .setAction(RecordingService.ACTION_START)
-                .putExtra(RecordingService.EXTRA_CAMERA_ID, selectedCameraId);
+                .putExtra(RecordingService.EXTRA_CAMERA_ID, selectedCameraId)
+                .putExtra(RecordingService.EXTRA_FOLDER_ID, folderId);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent);
@@ -732,7 +706,7 @@ public final class MainActivity extends Activity {
         }
         new AlertDialog.Builder(this)
                 .setTitle("Finish recording")
-                .setMessage("Choose whether to keep an encrypted copy in the private vault or discard this recording.")
+                .setMessage("Choose whether to save the recording in the currently unlocked encrypted folder or discard it.")
                 .setPositiveButton("Save encrypted", (dialog, which) -> sendStopAction(RecordingService.ACTION_SAVE_STOP))
                 .setNegativeButton("Delete recording", (dialog, which) -> sendStopAction(RecordingService.ACTION_DISCARD_STOP))
                 .setNeutralButton("Cancel", null)
@@ -908,14 +882,13 @@ public final class MainActivity extends Activity {
     }
 
     private Button createButton(String label, boolean primary) {
-        Button button = new Button(this);
-        button.setText(label);
-        button.setAllCaps(false);
-        button.setTextSize(15);
-        button.setTextColor(COLOR_TEXT);
-        button.setMinHeight(dp(46));
-        button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(primary ? COLOR_PRIMARY : COLOR_CARD));
-        return button;
+        Button button=new Button(this);
+        button.setText(label); button.setAllCaps(false); button.setTextSize(16);
+        button.setTypeface(null,android.graphics.Typeface.BOLD); button.setTextColor(COLOR_TEXT);
+        button.setMinHeight(dp(54));
+        android.graphics.drawable.GradientDrawable shape=new android.graphics.drawable.GradientDrawable();
+        shape.setColor(primary?COLOR_PRIMARY:COLOR_CARD); shape.setCornerRadius(dp(18));
+        button.setBackground(shape); button.setElevation(dp(2)); return button;
     }
 
     private LinearLayout.LayoutParams matchWrap() {

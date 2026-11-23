@@ -38,6 +38,7 @@ public final class RecordingService extends Service {
     static final String ACTION_DISCARD_STOP = "com.hiddencam.action.DISCARD_STOP";
     static final String ACTION_EMERGENCY_SAVE_LOCK = "com.hiddencam.action.EMERGENCY_SAVE_LOCK";
     static final String EXTRA_CAMERA_ID = "camera_id";
+    static final String EXTRA_FOLDER_ID = "folder_id";
 
     private static final String CHANNEL_ID = "hiddencam_recording";
     private static final int NOTIFICATION_ID = 4102;
@@ -58,6 +59,8 @@ public final class RecordingService extends Service {
     private CameraCaptureSession captureSession;
     private MediaRecorder mediaRecorder;
     private volatile File temporaryRecording;
+    private volatile String recordingFolderId;
+    private volatile javax.crypto.SecretKey recordingFolderKey;
     private boolean recorderStarted;
     private volatile boolean stopRequested;
     private volatile boolean finalizing;
@@ -83,6 +86,13 @@ public final class RecordingService extends Service {
                 return START_NOT_STICKY;
             }
             try {
+                String folderId=intent.getStringExtra(EXTRA_FOLDER_ID);
+                javax.crypto.SecretKey folderKey=SessionManager.getFolderKey(folderId);
+                if (folderId==null || !folderId.equals(SessionManager.getActiveRecordingFolder()) || folderKey==null) {
+                    lastResult="No place to save recording. Create or unlock an encrypted folder first.";
+                    isActive=false; stopSelf(startId); return START_NOT_STICKY;
+                }
+                recordingFolderId=folderId; recordingFolderKey=folderKey;
                 startCameraForeground();
                 beginRecording(intent.getStringExtra(EXTRA_CAMERA_ID));
             } catch (SecurityException exception) {
@@ -301,19 +311,15 @@ public final class RecordingService extends Service {
                     if (!validRecording || source == null || !source.isFile() || source.length() == 0) {
                         throw new java.io.IOException("No complete recording was available to encrypt.");
                     }
-                    // Prefer the currently unlocked protected folder when one is active.
-                    String folderId = SessionManager.getActiveRecordingFolder();
-                    javax.crypto.SecretKey folderKey = folderId != null ? SessionManager.getFolderKey(folderId) : null;
-                    if (folderId != null && folderKey != null) {
-                        try (java.io.FileInputStream in = new java.io.FileInputStream(source)) {
-                            FolderVaultManager.encryptStreamPublic(this, folderId, "recording-" + System.currentTimeMillis() + ".mp4", in, folderKey);
-                        }
-                        result = "Recording saved in the active protected folder";
-                    } else {
-                        // Fallback only when no folder is unlocked (should be rare after UI enforcement).
-                        VaultManager.encryptRecording(this, source);
-                        result = "Recording saved in the encrypted private vault (no active folder)";
+                    String folderId=recordingFolderId;
+                    javax.crypto.SecretKey folderKey=recordingFolderKey;
+                    if (folderId==null || folderKey==null)
+                        throw new java.io.IOException("No unlocked encrypted folder is available. The original recording will be retained for recovery.");
+                    try (java.io.FileInputStream in=new java.io.FileInputStream(source)) {
+                        FolderVaultManager.encryptStreamPublic(this,folderId,
+                            "recording-"+System.currentTimeMillis()+".mp4",in,folderKey);
                     }
+                    result="Recording saved in the selected encrypted folder";
                     if (!source.delete() && source.exists()) {
                         retainedInCache = !moveToRecovery(source);
                     }
@@ -341,6 +347,7 @@ public final class RecordingService extends Service {
                 }
             }
 
+            recordingFolderId=null; recordingFolderKey=null;
             lastResult = result;
             isActive = false;
             mainHandler.post(() -> {
@@ -491,6 +498,7 @@ public final class RecordingService extends Service {
             }
         }
         isActive = false;
+        recordingFolderId=null; recordingFolderKey=null;
         fileExecutor.shutdown();
         super.onDestroy();
     }

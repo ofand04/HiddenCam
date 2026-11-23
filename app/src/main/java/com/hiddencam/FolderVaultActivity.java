@@ -38,6 +38,7 @@ public final class FolderVaultActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        ImmersiveMode.apply(this);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         showFolders();
     }
@@ -60,6 +61,11 @@ public final class FolderVaultActivity extends Activity {
         root.addView(description, matchWrap());
         content = root;
         setContentView(scroll);
+    }
+
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) ImmersiveMode.apply(this);
     }
 
     private void showFolders() {
@@ -149,6 +155,7 @@ public final class FolderVaultActivity extends Activity {
         } catch (Exception exception) {
             addText("Could not read this folder: " + messageFor(exception));
         }
+        addButton("✓  Use this folder for recordings & return", this::finish, true);
         addButton("Lock folder", this::showFolders, false);
     }
 

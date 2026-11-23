@@ -31,6 +31,7 @@ public final class PlaybackActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        ImmersiveMode.apply(this);
         getWindow().setFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE,
                 android.view.WindowManager.LayoutParams.FLAG_SECURE);
         getWindow().setStatusBarColor(0xFF10131B);
@@ -99,6 +100,11 @@ public final class PlaybackActivity extends Activity {
     @Override protected void onStop() {
         super.onStop();
         if (!isChangingConfigurations() && !isFinishing()) finish();
+    }
+
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) ImmersiveMode.apply(this);
     }
 
     @Override protected void onDestroy() {
