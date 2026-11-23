@@ -164,18 +164,62 @@ final class VaultManager {
         if (!id.matches("[0-9a-fA-F]{32}")) {
             throw new IOException("Invalid vault entry");
         }
-        deleteKey(KEY_ALIAS_PREFIX + id);
-        return !encryptedFile.exists() || encryptedFile.delete();
+        boolean removed = !encryptedFile.exists() || encryptedFile.delete();
+        // Keep the key if file deletion fails; deleting it first can strand undeleted ciphertext.
+        if (removed) deleteKey(KEY_ALIAS_PREFIX + id);
+        return removed;
     }
 
     static void cleanupStaleTemporaryFiles(Context context) {
         File[] files = context.getCacheDir().listFiles();
-        if (files == null) {
-            return;
-        }
+        if (files == null) return;
         for (File file : files) {
             String name = file.getName();
-            if (name.startsWith("recording-") || name.startsWith("playback-")) {
+            if (name.startsWith("recording-")) {
+                // A previous process may have died before finalization. Never silently delete this source.
+                if (!RecordingService.isActive && !RecordingService.isRecording) retainStaleRecording(context, file);
+            } else if (name.startsWith("playback-") || name.startsWith("folder-")) {
+                deleteRecursively(file);
+            }
+        }
+    }
+
+    static File[] listRecoveryFiles(Context context) {
+        File recovery = new File(context.getFilesDir(), "recovery");
+        File[] files = recovery.listFiles((directory, name) -> name.endsWith(".mp4"));
+        if (files == null) return new File[0];
+        Arrays.sort(files, (first, second) -> Long.compare(second.lastModified(), first.lastModified()));
+        return files;
+    }
+
+    private static void retainStaleRecording(Context context, File source) {
+        if (source == null || !source.isFile()) return;
+        File recovery = new File(context.getFilesDir(), "recovery");
+        if (!recovery.exists() && !recovery.mkdirs()) return;
+        File destination = new File(recovery, "recovered-after-restart-" + System.currentTimeMillis() + ".mp4");
+        if (source.renameTo(destination)) return;
+        try (FileInputStream input = new FileInputStream(source);
+             FileOutputStream output = new FileOutputStream(destination)) {
+            byte[] buffer = new byte[BUFFER_SIZE];
+            int count;
+            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+            output.flush(); output.getFD().sync();
+            Arrays.fill(buffer, (byte) 0);
+            if (destination.length() == source.length()) source.delete();
+            else destination.delete();
+        } catch (Exception ignored) {
+            destination.delete();
+            // Deliberately leave source untouched if recovery move/copy fails.
+        }
+    }
+
+
+    static void clearPlaybackCache(Context context) {
+        File[] files = context.getCacheDir().listFiles();
+        if (files == null) return;
+        for (File file : files) {
+            String name = file.getName();
+            if (name.startsWith("playback-") || name.startsWith("folder-") || name.endsWith(".pending")) {
                 deleteRecursively(file);
             }
         }

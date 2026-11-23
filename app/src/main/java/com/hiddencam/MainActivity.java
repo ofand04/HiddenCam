@@ -13,6 +13,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.view.KeyEvent;
+import android.text.InputType;
+import android.widget.EditText;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -101,6 +105,38 @@ public final class MainActivity extends Activity {
         } else {
             showUnlockScreen(null);
         }
+    }
+
+
+    private long lastVolumeUpPress = 0L;
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP && event.getRepeatCount() == 0 && authenticated) {
+            long now = SystemClock.elapsedRealtime();
+            if (lastVolumeUpPress != 0L && now - lastVolumeUpPress <= 3000L) {
+                lastVolumeUpPress = 0L;
+                triggerEmergencyLock();
+                return true;
+            }
+            lastVolumeUpPress = now;
+            return super.onKeyDown(keyCode, event);
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    private void triggerEmergencyLock() {
+        authenticated = false;
+        lockOnResume = true;
+        if (RecordingService.isActive) {
+            Intent emergency = new Intent(this, RecordingService.class)
+                    .setAction(RecordingService.ACTION_EMERGENCY_SAVE_LOCK);
+            try { startService(emergency); }
+            catch (Exception exception) { Toast.makeText(this, "Could not request emergency save. Check the recording notification.", Toast.LENGTH_LONG).show(); }
+        } else {
+            VaultManager.clearCache(this);
+        }
+        showUnlockScreen("Emergency lock activated. Enter your PIN to unlock.");
     }
 
     @Override
@@ -227,7 +263,72 @@ public final class MainActivity extends Activity {
             }
         }
 
+        if (PinManager.isConfigured(preferences)) {
+            addButton(content, "Calculator-expression unlock", this::showCalculatorUnlockDialog);
+        }
         addText(content, "PINs are stored as salted PBKDF2-HMAC-SHA256 verifiers. The vault uses device-keystore encryption keys.", 12, COLOR_MUTED, 24);
+    }
+
+
+    private void showCalculatorUnlockDialog() {
+        EditText expression = new EditText(this);
+        expression.setSingleLine(true);
+        expression.setInputType(InputType.TYPE_CLASS_TEXT);
+        expression.setHint("Example: (1234 * 100) + 56");
+        new AlertDialog.Builder(this)
+                .setTitle("Calculator unlock")
+                .setMessage("Enter an arithmetic expression whose result is your existing six-digit PIN. The PIN itself is not changed.")
+                .setView(expression)
+                .setPositiveButton("Calculate & unlock", (dialog, which) -> {
+                    char[] calculatedPin = null;
+                    try {
+                        calculatedPin = CalculatorExpression.toSixDigitPin(expression.getText().toString());
+                        authenticateCalculatedPin(calculatedPin);
+                    } catch (Exception exception) {
+                        Toast.makeText(this, exception.getMessage() == null ? "Invalid expression." : exception.getMessage(), Toast.LENGTH_LONG).show();
+                    } finally {
+                        if (calculatedPin != null) Arrays.fill(calculatedPin, '\0');
+                        expression.setText("");
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void authenticateCalculatedPin(char[] enteredPin) {
+        long lockUntil = preferences.getLong("pin_lock_until", 0L);
+        if (System.currentTimeMillis() < lockUntil) {
+            Arrays.fill(enteredPin, '\0');
+            long remaining = Math.max(1L, (lockUntil - System.currentTimeMillis() + 999L) / 1000L);
+            Toast.makeText(this, "Try again in " + remaining + " seconds.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        char[] pinCopy = Arrays.copyOf(enteredPin, enteredPin.length);
+        pinExecutor.execute(() -> {
+            boolean accepted = false;
+            try { accepted = PinManager.verify(preferences, pinCopy); }
+            catch (Exception ignored) { }
+            finally { Arrays.fill(pinCopy, '\0'); }
+            boolean result = accepted;
+            mainHandler.post(() -> {
+                if (result) {
+                    preferences.edit().putInt("pin_failed_attempts", 0).putLong("pin_lock_until", 0L).apply();
+                    if (!resumed || isFinishing()) { authenticated = false; lockOnResume = true; return; }
+                    authenticated = true;
+                    showDashboard();
+                } else {
+                    int attempts = preferences.getInt("pin_failed_attempts", 0) + 1;
+                    SharedPreferences.Editor editor = preferences.edit();
+                    if (attempts >= MAX_FAILED_ATTEMPTS) {
+                        editor.putInt("pin_failed_attempts", 0)
+                                .putLong("pin_lock_until", System.currentTimeMillis() + LOCKOUT_MILLIS);
+                    } else editor.putInt("pin_failed_attempts", attempts);
+                    editor.apply();
+                    Toast.makeText(this, "Incorrect calculator result.", Toast.LENGTH_SHORT).show();
+                }
+            });
+        });
+        Arrays.fill(enteredPin, '\0');
     }
 
     private void handlePinKey(String key) {
@@ -430,6 +531,9 @@ public final class MainActivity extends Activity {
 
         addButton(content, "Start visible recording", this::requestRecordingPermissions);
         addButton(content, "Stop recording and choose Save or Delete", this::confirmStopRecording);
+        addButton(content, "Password-protected folders", () -> startActivity(new Intent(this, FolderVaultActivity.class)));
+        addButton(content, "Recover failed recordings", () -> startActivity(new Intent(this, RecoveryActivity.class)));
+        addButton(content, "Change app name and icon", this::showIdentityPicker);
         recordingStatus = addText(content, "", 14, COLOR_MUTED, 16);
         updateRecordingStatus();
         lastDisplayedRecordingResult = RecordingService.lastResult == null ? "" : RecordingService.lastResult;
@@ -444,11 +548,26 @@ public final class MainActivity extends Activity {
 
         addButton(content, "Lock HiddenCam", () -> {
             authenticated = false;
+            VaultManager.clearPlaybackCache(this);
             showUnlockScreen("HiddenCam is locked.");
         });
         addText(content,
                 "No microphone, network, contacts, location or external-storage permission is requested. PIN entry uses an in-app keypad.",
                 12, COLOR_MUTED, 20);
+    }
+
+
+    private void showIdentityPicker() {
+        new AlertDialog.Builder(this)
+                .setTitle("Launcher name and icon")
+                .setItems(AppIdentityManager.LABELS, (dialog, which) -> {
+                    try {
+                        AppIdentityManager.apply(this, which);
+                        Toast.makeText(this, "Launcher identity changed. Android may take a moment to refresh the icon.", Toast.LENGTH_LONG).show();
+                    } catch (Exception exception) {
+                        Toast.makeText(this, "Could not change the launcher identity.", Toast.LENGTH_LONG).show();
+                    }
+                }).show();
     }
 
     private void locateCameras() {

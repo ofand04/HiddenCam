@@ -1,23 +1,30 @@
-name: Build HiddenCam APKs
+name: HiddenCam Android Build and Release
 
 on:
   push:
-    branches: ["main", "master"]
-  pull_request:
-    branches: ["main", "master"]
+    tags:
+      - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release version (example: v1.0.5)"
+        required: true
+        type: string
+        default: "v1.0.5"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build:
+  build-and-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
 
     steps:
-      - name: Check out source
+      - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -34,33 +41,57 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          yes | sdkmanager --licenses
 
-      - name: Build debug and release APKs
-        run: gradle --no-daemon --stacktrace clean :app:assembleDebug :app:assembleRelease
+      - name: Run unit tests
+        run: gradle --no-daemon --stacktrace testDebugUnitTest
 
-      - name: Verify APK outputs
+      - name: Build APKs
+        run: |
+          gradle --no-daemon --stacktrace clean \
+            :app:assembleDebug \
+            :app:assembleRelease
+
+      - name: Verify APK files
         run: |
           test -s app/build/outputs/apk/debug/app-debug.apk
           test -s app/build/outputs/apk/release/app-release-unsigned.apk
 
-      - name: Upload APK artifacts
-        uses: actions/upload-artifact@v4
+      - name: Generate SHA256 checksums
+        run: |
+          cd app/build/outputs/apk
+          sha256sum debug/app-debug.apk \
+            release/app-release-unsigned.apk > SHA256SUMS
+
+      - name: Determine release tag
+        id: release
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.release_tag }}"
+          else
+            TAG="$GITHUB_REF_NAME"
+          fi
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $TAG"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: HiddenCam-apks
-          path: |
+          tag_name: ${{ steps.release.outputs.tag }}
+          target_commitish: main
+          name: HiddenCam ${{ steps.release.outputs.tag }}
+          generate_release_notes: true
+          make_latest: true
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/release/app-release-unsigned.apk
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Write build summary
-        if: always()
-        run: |
-          {
-            echo "## HiddenCam Android build"
-            echo ""
-            echo "- Debug APK: app/build/outputs/apk/debug/app-debug.apk"
-            echo "- Release APK: app/build/outputs/apk/release/app-release-unsigned.apk"
-            echo "- Commit: $GITHUB_SHA"
-          } >> "$GITHUB_STEP_SUMMARY"
+            app/build/outputs/apk/SHA256SUMS

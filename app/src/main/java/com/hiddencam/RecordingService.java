@@ -36,6 +36,7 @@ public final class RecordingService extends Service {
     static final String ACTION_START = "com.hiddencam.action.START";
     static final String ACTION_SAVE_STOP = "com.hiddencam.action.SAVE_STOP";
     static final String ACTION_DISCARD_STOP = "com.hiddencam.action.DISCARD_STOP";
+    static final String ACTION_EMERGENCY_SAVE_LOCK = "com.hiddencam.action.EMERGENCY_SAVE_LOCK";
     static final String EXTRA_CAMERA_ID = "camera_id";
 
     private static final String CHANNEL_ID = "hiddencam_recording";
@@ -93,6 +94,8 @@ public final class RecordingService extends Service {
             finalizeRecording(true);
         } else if (ACTION_DISCARD_STOP.equals(action)) {
             finalizeRecording(false);
+        } else if (ACTION_EMERGENCY_SAVE_LOCK.equals(action)) {
+            finalizeRecording(true);
         }
         return START_NOT_STICKY;
     }
@@ -279,9 +282,7 @@ public final class RecordingService extends Service {
     }
 
     private void finalizeRecording(boolean save) {
-        if (finalizing) {
-            return;
-        }
+        if (finalizing) return;
         finalizing = true;
         stopRequested = true;
         isRecording = false;
@@ -290,25 +291,44 @@ public final class RecordingService extends Service {
         boolean validRecording = closeCameraResources(true);
         File source = temporaryRecording;
         temporaryRecording = null;
+        final boolean requestedSave = save;
 
         fileExecutor.execute(() -> {
             String result;
+            boolean retainedInCache = false;
             try {
-                if (save && validRecording && source != null && source.isFile() && source.length() > 0) {
+                if (requestedSave) {
+                    if (!validRecording || source == null || !source.isFile() || source.length() == 0) {
+                        throw new java.io.IOException("No complete recording was available to encrypt.");
+                    }
+                    // Do not remove the only plaintext source until encryption has returned successfully.
                     VaultManager.encryptRecording(this, source);
                     result = "Recording saved in the encrypted private vault";
-                } else if (save) {
-                    result = "No complete recording was available to save";
+                    if (!source.delete() && source.exists()) {
+                        retainedInCache = !moveToRecovery(source);
+                    }
                 } else {
                     result = "Recording discarded";
+                    if (source != null) source.delete();
                 }
             } catch (Exception exception) {
-                result = "Recording could not be encrypted and was discarded";
+                boolean moved = source != null && source.isFile() && moveToRecovery(source);
+                retainedInCache = source != null && source.exists() && !moved;
+                result = moved
+                        ? "Encryption failed. The original recording was retained in app-private recovery storage."
+                        : (retainedInCache
+                            ? "Encryption failed. The original recording remains in app-private cache; do not clear app data."
+                            : "Recording could not be encrypted. No source copy was available to retain.");
             } finally {
-                if (source != null) {
+                if (requestedSave && source != null && source.exists() && !retainedInCache) {
+                    // A successful encrypted copy exists; source deletion is now safe.
                     source.delete();
                 }
-                VaultManager.clearCache(this);
+                if (retainedInCache) {
+                    VaultManager.clearPlaybackCache(this);
+                } else {
+                    VaultManager.clearCache(this);
+                }
             }
 
             lastResult = result;
@@ -318,6 +338,29 @@ public final class RecordingService extends Service {
                 stopSelf();
             });
         });
+    }
+
+    private boolean moveToRecovery(File source) {
+        if (source == null || !source.isFile()) return false;
+        File recovery = new File(getFilesDir(), "recovery");
+        if (!recovery.exists() && !recovery.mkdirs()) return false;
+        File destination = new File(recovery, "recovered-" + System.currentTimeMillis() + ".mp4");
+        if (source.renameTo(destination)) return true;
+        try (java.io.FileInputStream input = new java.io.FileInputStream(source);
+             java.io.FileOutputStream output = new java.io.FileOutputStream(destination)) {
+            byte[] buffer = new byte[64 * 1024];
+            int count;
+            while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+            output.flush();
+            output.getFD().sync();
+            java.util.Arrays.fill(buffer, (byte) 0);
+            if (destination.length() == source.length()) {
+                source.delete();
+                return true;
+            }
+        } catch (Exception ignored) { }
+        destination.delete();
+        return false;
     }
 
     private boolean closeCameraResources(boolean stopRecorder) {
