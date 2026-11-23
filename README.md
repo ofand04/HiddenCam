@@ -54,12 +54,3 @@ Android's camera privacy indicator and HiddenCam's ongoing recording notificatio
 - A calculator launcher disguise, concealment of camera use, and suppression of Android privacy indicators are not included.
 
 This is an initial source build. Validate recording, screen-lock continuation, playback and deletion on the target devices before relying on it for important footage.
-
-## Reference projects
-
-The architecture was studied against these GPL-3.0 Android projects:
-
-- [FadCam](https://github.com/anonfaded/FadCam) — camera recording services, camera selection and device capability handling.
-- [Valv-Android](https://github.com/Arctosoft/Valv-Android) — encrypted private media storage and vault-management concepts.
-
-No source files from those repositories are included in this implementation. HiddenCam is distributed under GPL-3.0; see `LICENSE`.
