@@ -34,7 +34,7 @@ import javax.crypto.spec.SecretKeySpec;
 /** Per-folder PBKDF2-derived AES-256-GCM encryption. Passwords are never persisted. */
 final class FolderVaultManager {
     private static final byte[] MAGIC = new byte[]{'H', 'C', 'F', 'V', 1};
-    private static final int ITERATIONS = 350_000;
+    private static final int ITERATIONS = 600_000;
     private static final int SALT_BYTES = 16;
     private static final int IV_BYTES = 12;
     private static final int TAG_BITS = 128;
@@ -139,6 +139,8 @@ final class FolderVaultManager {
                 wipeKey(key);
                 throw new SecurityException("Incorrect folder password.");
             }
+            // Keep the key only in memory for the current authenticated session.
+            SessionManager.unlockFolder(folderId, key);
             return key;
         } finally {
             Arrays.fill(salt, (byte) 0);
@@ -173,6 +175,12 @@ final class FolderVaultManager {
             if (input == null) throw new IOException("Could not read the selected file.");
             return encryptStream(context, folderId, displayName, input, key);
         }
+    }
+
+    /** Public entry point used by RecordingService for new captures. */
+    static Entry encryptStreamPublic(Context context, String folderId, String displayName,
+                                     InputStream input, SecretKey key) throws Exception {
+        return encryptStream(context, folderId, displayName, input, key);
     }
 
     private static Entry encryptStream(Context context, String folderId, String displayName,

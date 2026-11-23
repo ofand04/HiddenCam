@@ -301,9 +301,19 @@ public final class RecordingService extends Service {
                     if (!validRecording || source == null || !source.isFile() || source.length() == 0) {
                         throw new java.io.IOException("No complete recording was available to encrypt.");
                     }
-                    // Do not remove the only plaintext source until encryption has returned successfully.
-                    VaultManager.encryptRecording(this, source);
-                    result = "Recording saved in the encrypted private vault";
+                    // Prefer the currently unlocked protected folder when one is active.
+                    String folderId = SessionManager.getActiveRecordingFolder();
+                    javax.crypto.SecretKey folderKey = folderId != null ? SessionManager.getFolderKey(folderId) : null;
+                    if (folderId != null && folderKey != null) {
+                        try (java.io.FileInputStream in = new java.io.FileInputStream(source)) {
+                            FolderVaultManager.encryptStreamPublic(this, folderId, "recording-" + System.currentTimeMillis() + ".mp4", in, folderKey);
+                        }
+                        result = "Recording saved in the active protected folder";
+                    } else {
+                        // Fallback only when no folder is unlocked (should be rare after UI enforcement).
+                        VaultManager.encryptRecording(this, source);
+                        result = "Recording saved in the encrypted private vault (no active folder)";
+                    }
                     if (!source.delete() && source.exists()) {
                         retainedInCache = !moveToRecovery(source);
                     }

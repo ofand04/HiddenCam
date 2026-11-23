@@ -64,6 +64,7 @@ public final class FolderVaultActivity extends Activity {
 
     private void showFolders() {
         activeFolderId = null; activeFolderName = null; activeKey = null;
+        SessionManager.setActiveRecordingFolder(null);
         begin("Protected folders", "Each folder has its own password and AES-256-GCM encryption key. Passwords are not stored.");
         addButton("Create protected folder", this::showCreateDialog, true);
         List<FolderVaultManager.Folder> folders = FolderVaultManager.listFolders(this);
@@ -89,6 +90,7 @@ public final class FolderVaultActivity extends Activity {
                                 name.getText().toString(), secret);
                         activeKey = FolderVaultManager.unlock(this, folder.id, secret);
                         activeFolderId = folder.id; activeFolderName = folder.name;
+                        SessionManager.setActiveRecordingFolder(folder.id);
                         showFolderContents();
                     } catch (Exception exception) {
                         Toast.makeText(this, messageFor(exception), Toast.LENGTH_LONG).show();
@@ -106,6 +108,7 @@ public final class FolderVaultActivity extends Activity {
                     try {
                         activeKey = FolderVaultManager.unlock(this, folder.id, secret);
                         activeFolderId = folder.id; activeFolderName = folder.name;
+                        SessionManager.setActiveRecordingFolder(folder.id);
                         showFolderContents();
                     } catch (Exception exception) {
                         Toast.makeText(this, messageFor(exception), Toast.LENGTH_LONG).show();

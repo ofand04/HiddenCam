@@ -133,9 +133,8 @@ public final class MainActivity extends Activity {
                     .setAction(RecordingService.ACTION_EMERGENCY_SAVE_LOCK);
             try { startService(emergency); }
             catch (Exception exception) { Toast.makeText(this, "Could not request emergency save. Check the recording notification.", Toast.LENGTH_LONG).show(); }
-        } else {
-            VaultManager.clearCache(this);
         }
+        SecurityCleanup.performLockCleanup(this);
         showUnlockScreen("Emergency lock activated. Enter your PIN to unlock.");
     }
 
@@ -176,9 +175,9 @@ public final class MainActivity extends Activity {
     @Override
     protected void onStop() {
         super.onStop();
-        if (authenticated && !isChangingConfigurations()) {
-            lockOnResume = true;
-        } else if (!isChangingConfigurations()
+        // Persistent unlocked sessions: do NOT lock on normal navigation or onStop.
+        // Locking occurs only via the explicit Lock button or the emergency Volume-Up action.
+        if (!isChangingConfigurations()
                 && (pinBuffer.length() > 0 || firstPin != null || confirmingPin)) {
             pinBuffer.setLength(0);
             if (firstPin != null) {
@@ -203,13 +202,10 @@ public final class MainActivity extends Activity {
     }
 
     private void showEthicalWarning() {
-        beginScreen("Ethical use", "Please read before configuring the application.");
+        beginScreen("Responsible use", "Please read before configuring the application.");
         addCard(content,
-                "This application is an ethical privacy tool. Do not use this app to harm anyone, violate anyone's privacy, or record anyone without their knowledge and consent. You are responsible for ensuring that your use of this application complies with applicable laws and regulations.");
-        addText(content,
-                "Camera recording remains subject to Android permissions, camera privacy indicators, foreground-service rules and applicable laws.",
-                14, COLOR_MUTED, 18);
-        addButton(content, "I understand and agree", () -> {
+                "Use HiddenCam responsibly. Respect the privacy, rights, and applicable rules of others when recording.");
+        addButton(content, "Continue", () -> {
             preferences.edit().putBoolean("ethics_acknowledged", true).apply();
             showPinSetup();
         });
@@ -243,7 +239,8 @@ public final class MainActivity extends Activity {
                 {"1", "2", "3"},
                 {"4", "5", "6"},
                 {"7", "8", "9"},
-                {"Clear", "0", "Delete"}
+                {"Clear", "0", "Delete"},
+                {"="}
         };
         for (String[] rowValues : rows) {
             LinearLayout row = new LinearLayout(this);
@@ -314,7 +311,7 @@ public final class MainActivity extends Activity {
                 if (result) {
                     preferences.edit().putInt("pin_failed_attempts", 0).putLong("pin_lock_until", 0L).apply();
                     if (!resumed || isFinishing()) { authenticated = false; lockOnResume = true; return; }
-                    authenticated = true;
+                    authenticated = true; SessionManager.setApplicationUnlocked(true);
                     showDashboard();
                 } else {
                     int attempts = preferences.getInt("pin_failed_attempts", 0) + 1;
@@ -344,22 +341,30 @@ public final class MainActivity extends Activity {
             updatePinDots();
             return;
         }
+        if ("=".equals(key)) {
+            if (pinBuffer.length() >= 4) {
+                mainHandler.postDelayed(this::completePinEntry, 80L);
+            }
+            return;
+        }
         if (pinBuffer.length() >= PIN_LENGTH || key.length() != 1 || key.charAt(0) < '0' || key.charAt(0) > '9') {
             return;
         }
         pinBuffer.append(key);
         updatePinDots();
+        // Auto-submit when the configured length is reached; "=" can also submit earlier.
         if (pinBuffer.length() == PIN_LENGTH) {
             mainHandler.postDelayed(this::completePinEntry, 120L);
         }
     }
 
     private void completePinEntry() {
-        if (pinBuffer.length() != PIN_LENGTH) {
+        int len = pinBuffer.length();
+        if (len < 4 || len > 12) {
             return;
         }
-        char[] enteredPin = new char[PIN_LENGTH];
-        pinBuffer.getChars(0, PIN_LENGTH, enteredPin, 0);
+        char[] enteredPin = new char[len];
+        pinBuffer.getChars(0, len, enteredPin, 0);
         pinBuffer.setLength(0);
         updatePinDots();
 
@@ -403,7 +408,7 @@ public final class MainActivity extends Activity {
                                 return;
                             }
                             confirmingPin = false;
-                            authenticated = true;
+                            authenticated = true; SessionManager.setApplicationUnlocked(true);
                             showDashboard();
                         });
                     } catch (Exception exception) {
@@ -430,16 +435,32 @@ public final class MainActivity extends Activity {
             return;
         }
 
+        final char[] pinCopy = Arrays.copyOf(enteredPin, enteredPin.length);
+        Arrays.fill(enteredPin, '\0');
         pinExecutor.execute(() -> {
+            boolean isDuress = false;
             boolean accepted = false;
             try {
-                accepted = PinManager.verify(preferences, enteredPin);
+                if (PinManager.isDuressConfigured(preferences) && PinManager.verifyDuress(preferences, pinCopy)) {
+                    isDuress = true;
+                } else {
+                    accepted = PinManager.verify(preferences, pinCopy);
+                }
             } catch (Exception ignored) {
             } finally {
-                Arrays.fill(enteredPin, '\0');
+                Arrays.fill(pinCopy, '\0');
             }
-            boolean result = accepted;
+            final boolean duress = isDuress;
+            final boolean result = accepted;
             mainHandler.post(() -> {
+                if (duress) {
+                    // Immediate silent wipe. No confirmation, no indication of the code used.
+                    SecurityCleanup.performDuressWipe(MainActivity.this);
+                    authenticated = false;
+                    Toast.makeText(MainActivity.this, "Application data cleared.", Toast.LENGTH_LONG).show();
+                    showEthicalWarning();
+                    return;
+                }
                 if (result) {
                     preferences.edit().putInt("pin_failed_attempts", 0).putLong("pin_lock_until", 0L).apply();
                     if (!resumed || isFinishing()) {
@@ -447,7 +468,8 @@ public final class MainActivity extends Activity {
                         lockOnResume = true;
                         return;
                     }
-                    authenticated = true;
+                    authenticated = true; SessionManager.setApplicationUnlocked(true);
+                    SessionManager.setApplicationUnlocked(true);
                     showDashboard();
                 } else {
                     int attempts = preferences.getInt("pin_failed_attempts", 0) + 1;
@@ -489,7 +511,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showDashboard() {
-        authenticated = true;
+        authenticated = true; SessionManager.setApplicationUnlocked(true);
         lockOnResume = false;
         locateCameras();
         beginScreen("HiddenCam", "Private camera recording and encrypted local storage.");
@@ -548,12 +570,59 @@ public final class MainActivity extends Activity {
 
         addButton(content, "Lock HiddenCam", () -> {
             authenticated = false;
-            VaultManager.clearPlaybackCache(this);
+            SecurityCleanup.performLockCleanup(this);
             showUnlockScreen("HiddenCam is locked.");
         });
+        addButton(content, "Security settings (Duress Code)", this::showSecuritySettings);
         addText(content,
-                "No microphone, network, contacts, location or external-storage permission is requested. PIN entry uses an in-app keypad.",
+                "No microphone, network, contacts, location or external-storage permission is requested. PIN entry uses an in-app keypad. Double Volume-Up triggers emergency lock while the app is in the foreground.",
                 12, COLOR_MUTED, 20);
+    }
+
+    private void showSecuritySettings() {
+        if (!authenticated) {
+            return;
+        }
+        CharSequence[] items = new CharSequence[]{
+                PinManager.isDuressConfigured(preferences) ? "Change Duress Code" : "Set Duress Code",
+                "Disable Duress Code",
+                "Cancel"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("Duress Code")
+                .setItems(items, (dialog, which) -> {
+                    if (which == 0) {
+                        promptDuressCode(false);
+                    } else if (which == 1) {
+                        PinManager.clearDuressCode(preferences);
+                        Toast.makeText(this, "Duress Code disabled.", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .show();
+    }
+
+    private void promptDuressCode(boolean confirming) {
+        final EditText input = new EditText(this);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        input.setHint("4–12 digits, different from PIN");
+        new AlertDialog.Builder(this)
+                .setTitle(confirming ? "Confirm Duress Code" : "Set Duress Code")
+                .setMessage("Entering this code on the unlock screen will permanently erase all HiddenCam private data. There is no confirmation dialog.")
+                .setView(input)
+                .setPositiveButton("Save", (d, w) -> {
+                    char[] code = input.getText().toString().toCharArray();
+                    try {
+                        PinManager.setDuressCode(preferences, code);
+                        Toast.makeText(this, "Duress Code configured.", Toast.LENGTH_SHORT).show();
+                    } catch (Exception e) {
+                        Toast.makeText(this, e.getMessage() == null ? "Could not set Duress Code." : e.getMessage(), Toast.LENGTH_LONG).show();
+                    } finally {
+                        java.util.Arrays.fill(code, '\0');
+                        input.setText("");
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
 

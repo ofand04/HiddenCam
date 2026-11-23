@@ -1,10 +1,10 @@
-# HiddenCam
+# HiddenCam 1.1.0
 
-HiddenCam is an Android camera recorder with an application-private encrypted recording vault.
+HiddenCam is an Android camera recorder with protected encrypted folders, persistent unlocked sessions, calculator-style PIN authentication, optional Duress Code wipe, and emergency locking.
 
 ## Included in this build
 
-- A mandatory first-launch ethical-use acknowledgement.
+- A short responsible-use notice on first launch.
 - Six-digit PIN setup and unlock through an in-app numeric keypad.
 - Rear-camera and front-camera selection.
 - Camera2 video capture through a camera foreground service.
