@@ -112,7 +112,11 @@ public final class RecordingService extends Service {
 
     private void startCameraForeground() {
         Notification notification = buildNotification("Starting camera session");
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            int serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                    | ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+            startForeground(NOTIFICATION_ID, notification, serviceType);
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA);
         } else {
             startForeground(NOTIFICATION_ID, notification);
@@ -134,9 +138,13 @@ public final class RecordingService extends Service {
         Size recordingSize = chooseRecordingSize(manager, cameraId);
 
         mediaRecorder = new MediaRecorder();
+        mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
         mediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
         mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
         mediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
+        mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+        mediaRecorder.setAudioEncodingBitRate(128_000);
+        mediaRecorder.setAudioSamplingRate(44_100);
         mediaRecorder.setVideoEncodingBitRate(4_000_000);
         mediaRecorder.setVideoFrameRate(30);
         mediaRecorder.setVideoSize(recordingSize.getWidth(), recordingSize.getHeight());

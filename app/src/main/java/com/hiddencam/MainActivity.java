@@ -893,6 +893,9 @@ public final class MainActivity extends Activity {
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             missing.add(Manifest.permission.CAMERA);
         }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.RECORD_AUDIO);
+        }
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             missing.add(Manifest.permission.POST_NOTIFICATIONS);
@@ -928,14 +931,15 @@ public final class MainActivity extends Activity {
         }
         permissionRequestWasForRecording = false;
         boolean cameraGranted = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        boolean audioGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
         boolean notificationsGranted = Build.VERSION.SDK_INT < 33
                 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
-        if (cameraGranted && notificationsGranted) {
+        if (cameraGranted && audioGranted && notificationsGranted) {
             showDashboard();
             startRecordingService();
         } else {
             Toast.makeText(this,
-                    "Camera and notification permissions are required so camera use and recording controls remain visible.",
+                    "Camera, microphone and notification permissions are required for recording.",
                     Toast.LENGTH_LONG).show();
         }
     }
