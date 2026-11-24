@@ -6,11 +6,10 @@ import android.content.pm.PackageManager;
 
 /** Switches between launcher aliases whose labels and vector icons are declared in the manifest. */
 final class AppIdentityManager {
-    static final String[] LABELS = {"HiddenCam", "Calculator", "Notes"};
+    static final String[] LABELS = {"HiddenCam", "Calculator"};
     private static final String[] COMPONENTS = {
             "com.hiddencam.LauncherHiddenCam",
-            "com.hiddencam.LauncherCalculator",
-            "com.hiddencam.LauncherNotes"
+            "com.hiddencam.LauncherCalculator"
     };
 
     private AppIdentityManager() { }

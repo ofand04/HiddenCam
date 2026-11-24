@@ -52,20 +52,6 @@
             </intent-filter>
         </activity-alias>
 
-        <activity-alias
-            android:name=".LauncherNotes"
-            android:targetActivity=".MainActivity"
-            android:enabled="false"
-            android:exported="true"
-            android:label="Notes"
-            android:icon="@drawable/ic_launcher_notes"
-            android:roundIcon="@drawable/ic_launcher_notes">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
         <service
             android:name=".RecordingService"
             android:exported="false"
