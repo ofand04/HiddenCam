@@ -32,10 +32,10 @@ jobs:
           yes | sdkmanager --licenses
       - name: Run unit tests
         run: gradle --no-daemon --stacktrace testDebugUnitTest
-      - name: Build unsigned release APK
+      - name: Build the working debug APK for release distribution
         run: |
-          gradle --no-daemon --stacktrace clean :app:assembleRelease
-          cp app/build/outputs/apk/release/app-release-unsigned.apk "HiddenCam-release-${GITHUB_RUN_NUMBER}.apk"
+          gradle --no-daemon --stacktrace clean :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk "HiddenCam-release-${GITHUB_RUN_NUMBER}.apk"
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
