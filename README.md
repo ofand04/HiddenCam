@@ -1,8 +1,8 @@
-# HiddenCam 1.2.0
+# HiddenCam
 
 HiddenCam is an Android camera recorder with per-folder encrypted storage, private playback, calculator-based app authentication, and explicit recording controls.
 
-## What changed in 1.2.0
+## What changed
 
 - The locked entry screen is a functional calculator, not a PIN-only keypad. It supports decimal arithmetic, parentheses, percentages, and the usual arithmetic operators.
 - Tap `=` to calculate. Long-press `=` to submit the current entry as the configured app PIN. A PIN can be configured as 4–12 digits; no default PIN is embedded.
