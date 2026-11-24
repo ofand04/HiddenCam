@@ -1,0 +1,9 @@
+HiddenCam source update
+Base repository: https://github.com/ofand04/HiddenCam
+Base branch: main
+Base commit: 44da1bc704f739c936b38e0d80fa15d33051e367
+Package: com.hiddencam
+App version: 1.2.0 (versionCode 3)
+
+This is a standalone source tree based on the repository state above. It contains no .git history and does not modify the GitHub repository.
+The old repository SHA256SUMS file was not copied because its hashes describe the pre-update files and would be misleading here. SOURCE_SHA256SUMS contains hashes for this source package.
