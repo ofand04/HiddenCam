@@ -546,7 +546,6 @@ public final class MainActivity extends Activity {
 
         addText(content, "Live camera preview", 16, COLOR_TEXT, 8);
         cameraPreview = new TextureView(this);
-        cameraPreview.setBackgroundColor(0xFF000000);
         LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(-1, dp(220));
         previewParams.bottomMargin = dp(8);
         content.addView(cameraPreview, previewParams);

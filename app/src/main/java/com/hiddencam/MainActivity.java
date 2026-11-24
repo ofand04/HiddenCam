@@ -266,15 +266,18 @@ public final class MainActivity extends Activity {
             Arrays.fill(firstPin, '\0');
             firstPin = null;
         }
-        showPinScreen("Calculator", message == null ? "Tap = to calculate. Hold = to unlock HiddenCam." : message + "  Hold = to unlock.");
+        // Keep the configured lock screen visually identical to a normal calculator.
+        showPinScreen("", "");
     }
 
     private void showPinScreen(String title, String subtitle) {
         beginScreen(title, subtitle);
-        TextView label = addText(content, "CALCULATOR", 12, COLOR_MUTED, 8);
-        label.setGravity(Gravity.END);
-        pinMessage = addText(content, "Tap = to calculate. Hold = to unlock.", 13, COLOR_MUTED, 8);
-        pinMessage.setGravity(Gravity.END);
+        if (!PinManager.isConfigured(preferences)) {
+            TextView label = addText(content, "CALCULATOR", 12, COLOR_MUTED, 8);
+            label.setGravity(Gravity.END);
+            pinMessage = addText(content, "Tap = to calculate. Hold = to unlock.", 13, COLOR_MUTED, 8);
+            pinMessage.setGravity(Gravity.END);
+        }
         pinDots = addText(content, "0", 38, COLOR_TEXT, 20);
         pinDots.setGravity(Gravity.END);
         pinDots.setSingleLine(true);
@@ -312,10 +315,10 @@ public final class MainActivity extends Activity {
             if (pinBuffer.length() > 0) completePinEntry();
             return true;
         });
-        addText(content, PinManager.isConfigured(preferences)
-            ? "Use the calculator normally. Hold the = key to submit the displayed value as your PIN."
-            : "Create a 4–12 digit PIN, then hold = to confirm it. You will enter it the same way next time.",
-            12, COLOR_MUTED, 16);
+        if (!PinManager.isConfigured(preferences)) {
+            addText(content, "Create a 4–12 digit PIN, then hold = to confirm it. You will enter it the same way next time.",
+                    12, COLOR_MUTED, 16);
+        }
     }
 
     private void handlePinKey(String key) {
@@ -1086,25 +1089,29 @@ public final class MainActivity extends Activity {
                 ScrollView.LayoutParams.WRAP_CONTENT
         ));
 
-        TextView heading = new TextView(this);
-        heading.setText(title);
-        heading.setTextColor(COLOR_TEXT);
-        heading.setTextSize(27);
-        heading.setGravity(Gravity.CENTER);
-        heading.setTypeface(null, android.graphics.Typeface.BOLD);
-        LinearLayout.LayoutParams headingParams = matchWrap();
-        headingParams.bottomMargin = dp(8);
-        outer.addView(heading, headingParams);
+        if (title != null && !title.isEmpty()) {
+            TextView heading = new TextView(this);
+            heading.setText(title);
+            heading.setTextColor(COLOR_TEXT);
+            heading.setTextSize(27);
+            heading.setGravity(Gravity.CENTER);
+            heading.setTypeface(null, android.graphics.Typeface.BOLD);
+            LinearLayout.LayoutParams headingParams = matchWrap();
+            headingParams.bottomMargin = dp(8);
+            outer.addView(heading, headingParams);
+        }
 
-        TextView description = new TextView(this);
-        description.setText(subtitle);
-        description.setTextColor(COLOR_MUTED);
-        description.setTextSize(14);
-        description.setGravity(Gravity.CENTER);
-        description.setLineSpacing(dp(3), 1f);
-        LinearLayout.LayoutParams descriptionParams = matchWrap();
-        descriptionParams.bottomMargin = dp(22);
-        outer.addView(description, descriptionParams);
+        if (subtitle != null && !subtitle.isEmpty()) {
+            TextView description = new TextView(this);
+            description.setText(subtitle);
+            description.setTextColor(COLOR_MUTED);
+            description.setTextSize(14);
+            description.setGravity(Gravity.CENTER);
+            description.setLineSpacing(dp(3), 1f);
+            LinearLayout.LayoutParams descriptionParams = matchWrap();
+            descriptionParams.bottomMargin = dp(22);
+            outer.addView(description, descriptionParams);
+        }
 
         content = outer;
         setContentView(scroll);
